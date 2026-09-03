@@ -31,7 +31,11 @@ const canAddAny = computed(() => props.canCreatePublic || props.manageableGroups
 const visiblePasswordIds = ref<Set<number>>(new Set());
 function togglePasswordVisible(id: number) {
     const next = new Set(visiblePasswordIds.value);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) {
+        next.delete(id);
+    } else {
+        next.add(id);
+    }
     visiblePasswordIds.value = next;
 }
 
