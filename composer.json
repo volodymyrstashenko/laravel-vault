@@ -1,0 +1,44 @@
+{
+    "name": "thevps/laravel-vault",
+    "description": "Reusable password manager + Wi-Fi directory module for Laravel + Inertia + Vue apps.",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        { "name": "Volodymyr Stashenko" }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0",
+        "illuminate/http": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0",
+        "inertiajs/inertia-laravel": "^2.0|^3.0",
+        "spatie/laravel-medialibrary": "^11.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0",
+        "laravel/pint": "^1.18"
+    },
+    "autoload": {
+        "psr-4": {
+            "Thevps\\Vault\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Thevps\\Vault\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Thevps\\Vault\\VaultServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    }
+}
