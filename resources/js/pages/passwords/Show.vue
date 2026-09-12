@@ -2,20 +2,44 @@
 import ConfirmDeleteDialog from '@/components/ConfirmDeleteDialog.vue';
 import CredentialIcon from '@/components/credentials/CredentialIcon.vue';
 import TotpCode from '@/components/credentials/TotpCode.vue';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useInitials } from '@/composables/useInitials';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { accessLevelBadgeVariant, accessLevelLabel, canEditWith, canManageWith } from '@/lib/credentials';
+import { ACCESS_LEVEL_OPTIONS, accessLevelBadgeVariant, accessLevelLabel, canEditWith, canManageWith } from '@/lib/credentials';
 import type { BreadcrumbItem } from '@/types';
-import type { CredentialDetail } from '@/types/vault';
-import { Head, Link, router } from '@inertiajs/vue3';
-import { Check, Copy, Download, Eye, EyeOff, Globe, Lock, Paperclip, Plus, ShieldCheck, Trash2 } from '@lucide/vue';
+import type { CredentialDetail, CredentialDirectUser } from '@/types/vault';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { Check, Copy, Download, Eye, EyeOff, Globe, Lock, Paperclip, Plus, ShieldCheck, Trash2, UserPlus } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
 const props = defineProps<{
     credential: CredentialDetail;
+    availableUsersForAccess: { id: number; name: string; email: string }[];
 }>();
+
+const { getInitials } = useInitials();
+
+function changeDirectAccess(directUser: CredentialDirectUser, access_level: string) {
+    router.put(route('passwords.access.update', [props.credential.id, directUser.id]), { access_level }, { preserveScroll: true });
+}
+
+function removeDirectAccess(directUser: CredentialDirectUser) {
+    router.delete(route('passwords.access.destroy', [props.credential.id, directUser.id]), { preserveScroll: true });
+}
+
+const addAccessForm = useForm({ user_id: null as number | null, access_level: 'view' });
+
+function addDirectAccess() {
+    if (!addAccessForm.user_id) return;
+    addAccessForm.post(route('passwords.access.store', props.credential.id), {
+        preserveScroll: true,
+        onSuccess: () => (addAccessForm.user_id = null),
+    });
+}
 
 const breadcrumbs = computed<BreadcrumbItem[]>(() => [
     { title: 'Паролі', href: route('passwords.index') },
@@ -214,6 +238,88 @@ function formatSize(bytes: number): string {
                             </Link>
                         </div>
                         <p v-else class="text-sm text-muted-foreground">Без груп (публічний пароль)</p>
+                    </div>
+
+                    <div class="rounded-lg border bg-card p-5">
+                        <h2 class="mb-3 text-sm font-semibold">Персональний доступ</h2>
+
+                        <div v-if="credential.direct_users.length === 0 && !canManageWith(credential.access_level)" class="text-sm text-muted-foreground">
+                            Немає користувачів з окремим доступом
+                        </div>
+
+                        <div v-if="credential.direct_users.length" class="flex flex-col gap-2">
+                            <div
+                                v-for="directUser in credential.direct_users"
+                                :key="directUser.id"
+                                class="flex items-center gap-2.5 rounded-lg border border-sidebar-border/70 p-2.5 dark:border-sidebar-border"
+                            >
+                                <Avatar size="sm" class="size-8">
+                                    <AvatarFallback class="bg-primary/10 text-xs text-primary">{{ getInitials(directUser.name) }}</AvatarFallback>
+                                </Avatar>
+                                <div class="min-w-0 flex-1">
+                                    <p class="truncate text-sm font-medium text-foreground">{{ directUser.name }}</p>
+                                    <p class="truncate text-xs text-muted-foreground">{{ directUser.email }}</p>
+                                </div>
+
+                                <template v-if="canManageWith(credential.access_level)">
+                                    <Select
+                                        :model-value="directUser.access_level"
+                                        @update:model-value="(v) => changeDirectAccess(directUser, v as string)"
+                                    >
+                                        <SelectTrigger class="h-8 w-36 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem v-for="option in ACCESS_LEVEL_OPTIONS" :key="option.value" :value="option.value">
+                                                {{ option.label }}
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <button
+                                        type="button"
+                                        class="p-1.5 text-muted-foreground hover:text-destructive"
+                                        @click="removeDirectAccess(directUser)"
+                                    >
+                                        <Trash2 class="size-4" />
+                                    </button>
+                                </template>
+                                <Badge v-else :variant="accessLevelBadgeVariant(directUser.access_level)">{{
+                                    accessLevelLabel(directUser.access_level)
+                                }}</Badge>
+                            </div>
+                        </div>
+
+                        <form
+                            v-if="canManageWith(credential.access_level)"
+                            class="mt-4 flex items-end gap-2 border-t pt-4"
+                            @submit.prevent="addDirectAccess"
+                        >
+                            <div class="grid flex-1 gap-1.5">
+                                <Label class="text-xs">Надати доступ користувачу</Label>
+                                <Select
+                                    :model-value="addAccessForm.user_id ? String(addAccessForm.user_id) : undefined"
+                                    @update:model-value="(v) => (addAccessForm.user_id = v ? Number(v) : null)"
+                                >
+                                    <SelectTrigger><SelectValue placeholder="Обрати користувача…" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem v-for="user in availableUsersForAccess" :key="user.id" :value="String(user.id)">{{
+                                            user.name
+                                        }}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <Select v-model="addAccessForm.access_level">
+                                <SelectTrigger class="w-36"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem v-for="option in ACCESS_LEVEL_OPTIONS" :key="option.value" :value="option.value">{{
+                                        option.label
+                                    }}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Button type="submit" size="icon" :disabled="!addAccessForm.user_id || addAccessForm.processing">
+                                <UserPlus class="size-4" />
+                            </Button>
+                        </form>
                     </div>
 
                     <div class="rounded-lg border bg-card p-5">

@@ -42,6 +42,14 @@ export interface CredentialSummary {
     created_at: string;
 }
 
+/** One user granted DIRECT access to a single credential — no group involved. */
+export interface CredentialDirectUser {
+    id: number;
+    name: string;
+    email: string;
+    access_level: CredentialAccessLevel;
+}
+
 export interface CredentialDetail {
     id: number;
     name: string;
@@ -55,6 +63,7 @@ export interface CredentialDetail {
     custom_fields: CredentialCustomField[];
     attachments: CredentialAttachment[];
     groups: CredentialGroupRef[];
+    direct_users: CredentialDirectUser[];
     access_level: CredentialAccessLevel;
     created_by: { id: number; name: string } | null;
     created_at: string;

@@ -5,6 +5,7 @@ namespace Thevps\Vault\Tests;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Thevps\Vault\Events\CredentialAccessGranted;
 use Thevps\Vault\Events\CredentialGroupAccessGranted;
 use Thevps\Vault\Models\Credential;
 use Thevps\Vault\Models\CredentialGroup;
@@ -68,6 +69,83 @@ class VaultFlowTest extends TestCase
             [$groupA->id, $groupB->id],
             $credential->groups()->pluck('credential_groups.id')->all(),
         );
+    }
+
+    public function test_direct_user_access_grants_view_without_any_group(): void
+    {
+        Event::fake([CredentialAccessGranted::class]);
+        Http::fake();
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $stranger = TestUser::create(['name' => 'Stranger']);
+        $this->actingAs($owner);
+
+        $this->post(route('passwords.store'), [
+            'visibility' => 'public',
+            'name' => 'Direct share',
+            'password' => 'x',
+        ])->assertRedirect();
+        $credential = Credential::firstOrFail();
+
+        // Not a group member, and this credential is public anyway — but exercise the direct
+        // grant on a 'group' visibility credential with zero groups to prove it alone is enough.
+        $this->post(route('password-groups.store'), ['name' => 'unused'])->assertRedirect();
+        $this->post(route('passwords.store'), [
+            'visibility' => 'group',
+            'name' => 'Solo secret',
+            'password' => 'y',
+            'group_ids' => [CredentialGroup::where('name', 'unused')->value('id')],
+        ])->assertRedirect();
+        $solo = Credential::where('name', 'Solo secret')->firstOrFail();
+
+        // Stranger has no access at all yet.
+        $this->assertNull($solo->accessLevelFor($stranger));
+
+        $this->post(route('passwords.access.store', $solo), ['user_id' => $stranger->id, 'access_level' => 'edit'])->assertRedirect();
+        Event::assertDispatchedTimes(CredentialAccessGranted::class, 1);
+
+        $solo->load('directUsers');
+        $this->assertSame('edit', $solo->accessLevelFor($stranger));
+        $this->assertTrue($solo->canEdit($stranger));
+        $this->assertFalse($solo->canManage($stranger));
+
+        $this->actingAs($stranger)->get(route('passwords.show', $solo))->assertOk();
+
+        // Owner can change the level and revoke it again.
+        $this->actingAs($owner);
+        $this->put(route('passwords.access.update', [$solo, $stranger]), ['access_level' => 'view'])->assertRedirect();
+        $this->assertSame('view', $solo->refresh()->load('directUsers')->accessLevelFor($stranger));
+
+        $this->delete(route('passwords.access.destroy', [$solo, $stranger]))->assertRedirect();
+        $this->assertNull($solo->refresh()->load('directUsers')->accessLevelFor($stranger));
+
+        // A non-manager (edit-level, via direct grant) cannot grant access to others.
+        $this->post(route('passwords.access.store', $solo), ['user_id' => $stranger->id, 'access_level' => 'view'])->assertRedirect();
+        $viewer = TestUser::create(['name' => 'Viewer']);
+        $this->actingAs($stranger)->post(route('passwords.access.store', $solo), ['user_id' => $viewer->id, 'access_level' => 'view'])
+            ->assertForbidden();
+    }
+
+    public function test_deleting_a_group_is_allowed_when_the_credential_keeps_direct_access(): void
+    {
+        Http::fake();
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $grantee = TestUser::create(['name' => 'Grantee']);
+        $this->actingAs($owner);
+
+        $this->post(route('password-groups.store'), ['name' => 'Only'])->assertRedirect();
+        $group = CredentialGroup::firstOrFail();
+        $this->post(route('passwords.store'), ['visibility' => 'group', 'name' => 'x', 'group_ids' => [$group->id]])->assertRedirect();
+        $credential = Credential::firstOrFail();
+
+        $this->post(route('passwords.access.store', $credential), ['user_id' => $grantee->id, 'access_level' => 'view'])->assertRedirect();
+
+        // Even though this is the credential's only group, it isn't orphaned — Grantee still
+        // sees it via direct access — so deletion is NOT blocked.
+        $this->delete(route('password-groups.destroy', $group))->assertRedirect();
+        $this->assertDatabaseCount('credential_groups', 0);
+        $this->assertSame('view', $credential->refresh()->load('directUsers')->accessLevelFor($grantee));
     }
 
     public function test_public_credential_is_visible_to_everyone_but_editable_only_by_creator_or_group(): void

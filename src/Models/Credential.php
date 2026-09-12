@@ -60,6 +60,21 @@ class Credential extends Model implements HasMedia
     }
 
     /**
+     * Users granted access to THIS credential directly, without going through a group — see
+     * HasGroupAccess::accessLevelFor(), which folds this into the same union-of-levels logic.
+     */
+    public function directUsers(): BelongsToMany
+    {
+        // Explicit pivot keys (not inferred) — inference would derive the related key from the
+        // host's user model class name (e.g. 'test_user_id' for a TestUser in the package's own
+        // Testbench suite), but the pivot column is always literally 'user_id' regardless of
+        // what the host names its user model.
+        return $this->belongsToMany(Vault::userModel(), 'credential_user_access', 'credential_id', 'user_id')
+            ->withPivot('access_level')
+            ->withTimestamps();
+    }
+
+    /**
      * `icon` — the service favicon, one per credential, fetched & cached server-side
      * (CredentialController::refreshIcon()). `attachments` — arbitrary user files (recovery
      * codes, a scan…), unlimited.

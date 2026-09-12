@@ -8,8 +8,10 @@ use Illuminate\Routing\Controller;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Thevps\Vault\Events\CredentialAccessGranted;
 use Thevps\Vault\Http\Requests\StoreCredentialRequest;
 use Thevps\Vault\Http\Requests\UpdateCredentialRequest;
 use Thevps\Vault\Models\Credential;
@@ -32,9 +34,16 @@ class CredentialController extends Controller
             ->where('user_id', $user->getKey())
             ->pluck('access_level', 'credential_group_id');
 
+        // Same one-query trick as group access, for credentials shared with this user directly
+        // (no group involved) — see Credential::directUsers()/HasGroupAccess.
+        $myDirectAccess = DB::table('credential_user_access')
+            ->where('user_id', $user->getKey())
+            ->pluck('access_level', 'credential_id');
+
         $credentials = Credential::query()
-            ->where(function ($q) use ($myAccess) {
+            ->where(function ($q) use ($myAccess, $myDirectAccess) {
                 $q->whereHas('groups', fn ($g) => $g->whereIn('credential_groups.id', $myAccess->keys()))
+                    ->orWhereIn('id', $myDirectAccess->keys())
                     ->orWhere('visibility', 'public');
             })
             ->with(['groups:id,name', 'creator:id,name'])
@@ -55,7 +64,7 @@ class CredentialController extends Controller
 
         return Inertia::render(Vault::page('passwords/Index'), [
             'credentials' => [
-                'data' => $credentials->through(fn (Credential $credential) => $this->presentSummary($credential, $myAccess, $user))->items(),
+                'data' => $credentials->through(fn (Credential $credential) => $this->presentSummary($credential, $myAccess, $myDirectAccess, $user))->items(),
                 'meta' => $this->paginationMeta($credentials),
             ],
             'query' => (object) $request->only(['search', 'sort', 'direction', 'page']),
@@ -103,7 +112,58 @@ class CredentialController extends Controller
 
         return Inertia::render(Vault::page('passwords/Show'), [
             'credential' => $this->presentDetail($credential, $accessLevel),
+            'availableUsersForAccess' => $accessLevel === CredentialGroup::ACCESS_MANAGE
+                ? $this->availableUsersForDirectAccess($credential)
+                : [],
         ]);
+    }
+
+    /** Grant one specific user direct access to this credential, without any group. */
+    public function addAccess(Request $request, Credential $credential): RedirectResponse
+    {
+        abort_unless($credential->canManage($request->user()), 403);
+
+        $validated = $request->validate([
+            'user_id' => ['required', Rule::exists(Vault::usersTable(), 'id')],
+            'access_level' => ['required', Rule::in(CredentialGroup::ACCESS_LEVELS)],
+        ]);
+
+        if ($credential->directUsers()->wherePivot('user_id', $validated['user_id'])->exists()) {
+            return back()->with('error', 'Цей користувач вже має доступ до цього пароля.');
+        }
+
+        $credential->directUsers()->attach($validated['user_id'], ['access_level' => $validated['access_level']]);
+
+        $grantedUser = Vault::userQuery()->find($validated['user_id']);
+        if ($grantedUser) {
+            event(new CredentialAccessGranted($credential, $grantedUser, $validated['access_level']));
+        }
+
+        return back()->with('success', 'Доступ надано.');
+    }
+
+    public function updateAccess(Request $request, Credential $credential, $user): RedirectResponse
+    {
+        abort_unless($credential->canManage($request->user()), 403);
+
+        $validated = $request->validate([
+            'access_level' => ['required', Rule::in(CredentialGroup::ACCESS_LEVELS)],
+        ]);
+
+        $userId = is_object($user) ? $user->getKey() : $user;
+        $credential->directUsers()->updateExistingPivot($userId, ['access_level' => $validated['access_level']]);
+
+        return back()->with('success', 'Рівень доступу оновлено.');
+    }
+
+    public function removeAccess(Request $request, Credential $credential, $user): RedirectResponse
+    {
+        abort_unless($credential->canManage($request->user()), 403);
+
+        $userId = is_object($user) ? $user->getKey() : $user;
+        $credential->directUsers()->detach($userId);
+
+        return back()->with('success', 'Доступ прибрано.');
     }
 
     public function edit(Request $request, Credential $credential): Response
@@ -205,7 +265,7 @@ class CredentialController extends Controller
             ->get(['id', 'name']);
     }
 
-    private function presentSummary(Credential $credential, Collection $myAccess, $user): array
+    private function presentSummary(Credential $credential, Collection $myAccess, Collection $myDirectAccess, $user): array
     {
         $level = null;
         foreach ($credential->groups as $group) {
@@ -213,6 +273,11 @@ class CredentialController extends Controller
             if (CredentialGroup::accessRank($groupLevel) > CredentialGroup::accessRank($level)) {
                 $level = $groupLevel;
             }
+        }
+
+        $directLevel = $myDirectAccess->get($credential->id);
+        if (CredentialGroup::accessRank($directLevel) > CredentialGroup::accessRank($level)) {
+            $level = $directLevel;
         }
 
         if ($credential->visibility === 'public' && $level === null) {
@@ -234,9 +299,20 @@ class CredentialController extends Controller
         ];
     }
 
+    /** Users who may be granted direct access — everyone else, minus those who already have it. */
+    private function availableUsersForDirectAccess(Credential $credential)
+    {
+        $existingIds = $credential->directUsers->map->getKey()->all();
+
+        return Vault::availableUsersQuery()
+            ->whereNotIn(Vault::userQuery()->getModel()->getQualifiedKeyName(), $existingIds ?: [0])
+            ->orderBy('name')
+            ->get(['id', 'name', 'email']);
+    }
+
     private function presentDetail(Credential $credential, string $accessLevel): array
     {
-        $credential->load('groups:id,name', 'creator:id,name');
+        $credential->load('groups:id,name', 'creator:id,name', 'directUsers:id,name,email');
 
         return [
             'id' => $credential->id,
@@ -253,6 +329,12 @@ class CredentialController extends Controller
             'custom_fields' => $credential->custom_fields ?? [],
             'attachments' => $credential->attachmentsList(),
             'groups' => $credential->groups->map(fn (CredentialGroup $group) => ['id' => $group->id, 'name' => $group->name])->values(),
+            'direct_users' => $credential->directUsers->map(fn ($directUser) => [
+                'id' => $directUser->getKey(),
+                'name' => $directUser->name,
+                'email' => $directUser->email,
+                'access_level' => $directUser->pivot->access_level,
+            ])->values(),
             'access_level' => $accessLevel,
             'created_by' => $credential->creator?->only(['id', 'name']),
             'created_at' => $credential->created_at?->toDateString(),

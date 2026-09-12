@@ -16,6 +16,10 @@ use Thevps\Vault\Models\CredentialGroup;
  * `visibility === 'public'` widens VIEW to every authenticated user; edit/manage still come
  * from group membership — except the record's own creator, who keeps 'manage' so a public
  * record created without any group still has someone able to manage it.
+ *
+ * A model MAY additionally define `directUsers(): BelongsToMany` (Credential does — see there)
+ * to grant access to one specific person without any group at all; the level folds into the
+ * same union as group membership. Models that don't define it (WifiNetwork) are unaffected.
  */
 trait HasGroupAccess
 {
@@ -30,6 +34,13 @@ trait HasGroupAccess
             }
         }
 
+        if (method_exists($this, 'directUsers')) {
+            $directLevel = $this->directAccessLevelFor($user);
+            if (CredentialGroup::accessRank($directLevel) > CredentialGroup::accessRank($best)) {
+                $best = $directLevel;
+            }
+        }
+
         if ($this->visibility === 'public') {
             $isCreator = $this->created_by_id !== null && (int) $this->created_by_id === (int) $user->getKey();
             $floor = $isCreator ? CredentialGroup::ACCESS_MANAGE : CredentialGroup::ACCESS_VIEW;
@@ -40,6 +51,16 @@ trait HasGroupAccess
         }
 
         return $best;
+    }
+
+    /** This user's directly-granted level on this specific record, or null. */
+    private function directAccessLevelFor($user): ?string
+    {
+        if ($this->relationLoaded('directUsers')) {
+            return $this->directUsers->firstWhere($user->getKeyName(), $user->getKey())?->pivot?->access_level;
+        }
+
+        return $this->directUsers()->wherePivot('user_id', $user->getKey())->first()?->pivot?->access_level;
     }
 
     public function canView($user): bool

@@ -97,11 +97,14 @@ class CredentialGroupController extends Controller
     {
         abort_unless($credential_group->accessLevelFor($request->user()) === CredentialGroup::ACCESS_MANAGE, 403);
 
-        // A credential left with no group at all becomes invisible to everyone (no admin bypass
-        // in this module — deliberate) — so deletion is blocked until such credentials are
-        // moved into another group or deleted themselves.
+        // A credential left with no group AND no direct user access at all becomes invisible to
+        // everyone (no admin bypass in this module — deliberate) — so deletion is blocked until
+        // such credentials are moved into another group, granted direct access, or deleted
+        // themselves. A credential that still has at least one direct grant isn't orphaned even
+        // without any group left.
         $orphaned = $credential_group->credentials()
             ->whereDoesntHave('groups', fn ($q) => $q->where('credential_groups.id', '!=', $credential_group->id))
+            ->whereDoesntHave('directUsers')
             ->count();
         if ($orphaned > 0) {
             return Redirect::route(Vault::routeName('password_groups', 'show'), $credential_group->id)

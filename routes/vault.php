@@ -32,6 +32,10 @@ Route::prefix($names['passwords'])->name($names['passwords'].'.')->group(functio
 
     Route::post('/{credential}/attachments', [CredentialController::class, 'storeAttachment'])->name('attachments.store');
     Route::delete('/{credential}/attachments/{mediaId}', [CredentialController::class, 'destroyAttachment'])->name('attachments.destroy');
+
+    Route::post('/{credential}/access', [CredentialController::class, 'addAccess'])->name('access.store');
+    Route::put('/{credential}/access/{user}', [CredentialController::class, 'updateAccess'])->name('access.update');
+    Route::delete('/{credential}/access/{user}', [CredentialController::class, 'removeAccess'])->name('access.destroy');
 });
 
 Route::prefix($names['password_groups'])->name($names['password_groups'].'.')->group(function () {
