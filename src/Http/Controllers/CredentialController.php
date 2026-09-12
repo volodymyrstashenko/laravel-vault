@@ -75,6 +75,9 @@ class CredentialController extends Controller
     {
         return Inertia::render(Vault::page('passwords/Create'), [
             'manageableGroups' => $this->manageableGroups($request->user()),
+            // The credential doesn't exist yet, so there's no "already granted" to exclude —
+            // every user is a candidate for an initial direct-access grant.
+            'availableUsersForAccess' => $this->availableUsersForDirectAccess(),
         ]);
     }
 
@@ -92,12 +95,27 @@ class CredentialController extends Controller
         }
 
         $credential = Credential::create([
-            ...collect($data)->except('group_ids')->all(),
+            ...collect($data)->except(['group_ids', 'direct_access'])->all(),
             'created_by_id' => $user->getKey(),
         ]);
 
         if ($groupIds) {
             $credential->groups()->attach($groupIds);
+        }
+
+        // Initial direct-access grants, chosen at creation time (before the credential has its
+        // own Show page to manage them from) — same flow/event as CredentialController::addAccess().
+        $directAccess = collect($data['direct_access'] ?? [])
+            ->filter(fn ($row) => filled($row['user_id'] ?? null))
+            ->unique('user_id');
+
+        foreach ($directAccess as $row) {
+            $credential->directUsers()->attach($row['user_id'], ['access_level' => $row['access_level']]);
+
+            $grantedUser = Vault::userQuery()->find($row['user_id']);
+            if ($grantedUser) {
+                event(new CredentialAccessGranted($credential, $grantedUser, $row['access_level']));
+            }
         }
 
         $this->refreshIcon($credential);
@@ -299,10 +317,13 @@ class CredentialController extends Controller
         ];
     }
 
-    /** Users who may be granted direct access — everyone else, minus those who already have it. */
-    private function availableUsersForDirectAccess(Credential $credential)
+    /**
+     * Users who may be granted direct access — everyone else, minus those who already have it.
+     * `$credential` is omitted on the create form, where there's nothing to exclude yet.
+     */
+    private function availableUsersForDirectAccess(?Credential $credential = null)
     {
-        $existingIds = $credential->directUsers->map->getKey()->all();
+        $existingIds = $credential ? $credential->directUsers->map->getKey()->all() : [];
 
         return Vault::availableUsersQuery()
             ->whereNotIn(Vault::userQuery()->getModel()->getQualifiedKeyName(), $existingIds ?: [0])

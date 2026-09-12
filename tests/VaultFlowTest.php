@@ -71,6 +71,32 @@ class VaultFlowTest extends TestCase
         );
     }
 
+    public function test_direct_access_can_be_granted_at_creation_time(): void
+    {
+        Event::fake([CredentialAccessGranted::class]);
+        Http::fake();
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $grantee = TestUser::create(['name' => 'Grantee']);
+        $this->actingAs($owner);
+
+        $this->post(route('passwords.store'), [
+            'visibility' => 'public',
+            'name' => 'Created with direct access',
+            'password' => 'x',
+            'direct_access' => [
+                ['user_id' => $grantee->id, 'access_level' => 'edit'],
+                ['user_id' => $grantee->id, 'access_level' => 'edit'], // duplicate — must not 500
+                ['user_id' => null, 'access_level' => 'view'], // blank row from the UI — ignored
+            ],
+        ])->assertRedirect();
+
+        $credential = Credential::firstOrFail();
+        Event::assertDispatchedTimes(CredentialAccessGranted::class, 1);
+        $this->assertSame('edit', $credential->accessLevelFor($grantee));
+        $this->assertCount(1, $credential->directUsers()->wherePivot('user_id', $grantee->id)->get());
+    }
+
     public function test_direct_user_access_grants_view_without_any_group(): void
     {
         Event::fake([CredentialAccessGranted::class]);

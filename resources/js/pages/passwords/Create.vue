@@ -7,6 +7,7 @@ import { Head } from '@inertiajs/vue3';
 
 defineProps<{
     manageableGroups: CredentialGroupRef[];
+    availableUsersForAccess: { id: number; name: string; email: string }[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -19,6 +20,6 @@ const breadcrumbs: BreadcrumbItem[] = [
     <Head title="Новий пароль" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <CredentialForm :manageable-groups="manageableGroups" />
+        <CredentialForm :manageable-groups="manageableGroups" :available-users-for-access="availableUsersForAccess" />
     </AppLayout>
 </template>

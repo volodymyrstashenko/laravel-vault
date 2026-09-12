@@ -5,9 +5,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { canManageWith, VISIBILITY_OPTIONS } from '@/lib/credentials';
+import { ACCESS_LEVEL_OPTIONS, canManageWith, VISIBILITY_OPTIONS } from '@/lib/credentials';
 import { generatePassword } from '@/lib/passwordGenerator';
-import type { CredentialDetail, CredentialFieldType, CredentialGroupRef, CredentialVisibility } from '@/types/vault';
+import type { CredentialAccessLevel, CredentialDetail, CredentialFieldType, CredentialGroupRef, CredentialVisibility } from '@/types/vault';
 import { useForm } from '@inertiajs/vue3';
 import { Dices, Eye, EyeOff, Globe, Lock, Plus, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
@@ -18,10 +18,18 @@ const CUSTOM_FIELD_TYPE_OPTIONS: { value: CredentialFieldType; label: string }[]
     { value: 'boolean', label: 'Прапорець' },
 ];
 
-const props = defineProps<{
-    credential?: CredentialDetail;
-    manageableGroups: CredentialGroupRef[];
-}>();
+const props = withDefaults(
+    defineProps<{
+        credential?: CredentialDetail;
+        manageableGroups: CredentialGroupRef[];
+        // Only meaningful (and only passed) on create — see the "Персональний доступ" section
+        // below. Editing an existing credential's direct-access grants happens on its own Show
+        // page instead (passwords/Show.vue), same as group membership lives on the group's Show
+        // page — there's simply no such page yet for a credential that doesn't exist.
+        availableUsersForAccess?: { id: number; name: string; email: string }[];
+    }>(),
+    { availableUsersForAccess: () => [] },
+);
 
 const isEdit = computed(() => Boolean(props.credential));
 // The group set can only be changed with 'manage' on the credential (not just 'edit') — see
@@ -38,6 +46,7 @@ const form = useForm({
     notes: props.credential?.notes ?? '',
     custom_fields: props.credential?.custom_fields.map((f) => ({ ...f })) ?? [],
     group_ids: props.credential?.groups.map((g) => g.id) ?? ([] as number[]),
+    direct_access: [] as { user_id: number | null; access_level: CredentialAccessLevel }[],
 });
 
 const groupsRequired = computed(() => form.visibility !== 'public');
@@ -71,13 +80,24 @@ function toggleGroup(id: number) {
     }
 }
 
+function addDirectAccessRow() {
+    form.direct_access = [...form.direct_access, { user_id: null, access_level: 'view' }];
+}
+
+function removeDirectAccessRow(index: number) {
+    form.direct_access = form.direct_access.filter((_, i) => i !== index);
+}
+
 function submit() {
     if (isEdit.value && props.credential) {
         // If groups aren't editable (no 'manage') — don't send group_ids at all, so the
         // backend right-check (which only fires when the field is present) isn't triggered.
-        form.transform((data) => (canEditGroups.value ? data : { ...data, group_ids: undefined })).put(
-            route('passwords.update', props.credential!.id),
-        );
+        // direct_access is create-only (see the prop docs above) — never sent on edit.
+        form.transform((data) => ({
+            ...data,
+            direct_access: undefined,
+            group_ids: canEditGroups.value ? data.group_ids : undefined,
+        })).put(route('passwords.update', props.credential!.id));
     } else {
         form.post(route('passwords.store'));
     }
@@ -287,6 +307,55 @@ function submit() {
                         </template>
                     </div>
                     <InputError :message="form.errors.group_ids" class="mt-2" />
+                </div>
+
+                <div v-if="!isEdit" class="rounded-lg border bg-card p-5">
+                    <div class="mb-1 flex items-center justify-between">
+                        <h2 class="text-sm font-semibold">Персональний доступ</h2>
+                        <Button type="button" variant="outline" size="sm" class="gap-1.5" @click="addDirectAccessRow">
+                            <Plus class="size-3.5" />
+                            Додати людину
+                        </Button>
+                    </div>
+                    <p class="mb-4 text-xs text-muted-foreground">
+                        Опційно — дати доступ конкретній людині напряму, без групи. Пізніше склад можна змінити на сторінці пароля.
+                    </p>
+
+                    <p v-if="form.direct_access.length === 0" class="text-sm text-muted-foreground">Нікого не додано.</p>
+
+                    <div v-else class="flex flex-col gap-3">
+                        <div v-for="(row, index) in form.direct_access" :key="index" class="flex items-end gap-2">
+                            <div class="grid flex-1 gap-1.5">
+                                <Label class="text-xs">Користувач</Label>
+                                <Select
+                                    :model-value="row.user_id ? String(row.user_id) : undefined"
+                                    @update:model-value="(v) => (row.user_id = v ? Number(v) : null)"
+                                >
+                                    <SelectTrigger><SelectValue placeholder="Обрати користувача…" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem v-for="u in availableUsersForAccess" :key="u.id" :value="String(u.id)">{{ u.name }}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div class="grid gap-1.5">
+                                <Label class="text-xs">Рівень</Label>
+                                <Select v-model="row.access_level">
+                                    <SelectTrigger class="w-36"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem v-for="option in ACCESS_LEVEL_OPTIONS" :key="option.value" :value="option.value">
+                                            {{ option.label }}
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <button type="button" class="mb-2 p-2 text-muted-foreground hover:text-destructive" @click="removeDirectAccessRow(index)">
+                                <Trash2 class="size-4" />
+                            </button>
+                        </div>
+                    </div>
+                    <InputError :message="form.errors.direct_access" class="mt-2" />
                 </div>
             </div>
         </div>
