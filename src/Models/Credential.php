@@ -10,6 +10,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Thevps\Vault\Concerns\HasGroupAccess;
 use Thevps\Vault\Concerns\ScopedToInstitution;
+use Thevps\Vault\Support\MediaUrl;
 use Thevps\Vault\Vault;
 
 /**
@@ -87,7 +88,7 @@ class Credential extends Model implements HasMedia
 
     public function iconUrl(): ?string
     {
-        return $this->getFirstMediaUrl('icon') ?: null;
+        return MediaUrl::for($this->getFirstMedia('icon'));
     }
 
     public function attachmentsList(): array
@@ -97,7 +98,7 @@ class Credential extends Model implements HasMedia
             'file_name' => $media->file_name,
             'size' => $media->size,
             'mime_type' => $media->mime_type,
-            'url' => $media->getUrl(),
+            'url' => MediaUrl::for($media),
             'created_at' => $media->created_at?->toIso8601String(),
         ])->values()->all();
     }
