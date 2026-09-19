@@ -202,6 +202,37 @@ class VaultFlowTest extends TestCase
         $this->assertSame('renamed', $credential->refresh()->name);
     }
 
+    /**
+     * "Copy password" straight from the list (host's passwords/Index.vue row menu) — same ACL
+     * as show(), reachable without a full page navigation.
+     */
+    public function test_reveal_returns_the_password_for_anyone_with_view_access(): void
+    {
+        Event::fake([CredentialGroupAccessGranted::class]);
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $viewer = TestUser::create(['name' => 'Viewer']);
+        $stranger = TestUser::create(['name' => 'Stranger']);
+        $this->actingAs($owner);
+
+        $this->post(route('password-groups.store'), ['name' => 'Hosting'])->assertRedirect();
+        $group = CredentialGroup::firstOrFail();
+        $this->post(route('passwords.store'), [
+            'visibility' => 'group',
+            'name' => 'cPanel',
+            'password' => 's3cret',
+            'group_ids' => [$group->id],
+        ])->assertRedirect();
+        $credential = Credential::firstOrFail();
+        $this->post(route('password-groups.members.store', $group), ['user_id' => $viewer->id, 'access_level' => 'view'])->assertRedirect();
+
+        $this->actingAs($viewer)->getJson(route('passwords.reveal', $credential))
+            ->assertOk()
+            ->assertJson(['password' => 's3cret']);
+
+        $this->actingAs($stranger)->getJson(route('passwords.reveal', $credential))->assertForbidden();
+    }
+
     public function test_wifi_public_quick_list_bands_and_windows_profile(): void
     {
         $owner = TestUser::create(['name' => 'Owner']);

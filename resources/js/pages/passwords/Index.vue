@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useTableQuery } from '@/composables/useTableQuery';
+import { useToast } from '@/composables/useToast';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { accessLevelBadgeVariant, accessLevelLabel, canEditWith, canManageWith } from '@/lib/credentials';
 import { fromQueryParams } from '@/lib/table';
@@ -31,6 +32,29 @@ const columns: TableColumn<CredentialSummary>[] = [
 ];
 
 const query = useTableQuery({ path: route('passwords.index'), initial: fromQueryParams(props.query, []) });
+
+const { success, error } = useToast();
+
+/** Клацнути в меню рядка — на прохання користувача, за зразком меню Bitwarden. Логін вже є в
+ *  рядку (не секрет), пароль запитуємо на вимогу через окремий JSON-ендпоінт (`reveal()`) —
+ *  список НІКОЛИ не тримає розшифровані паролі всіх рядків одразу заради однієї кнопки. */
+function copyLogin(row: CredentialSummary) {
+    if (!row.login) return;
+    navigator.clipboard.writeText(row.login);
+    success('Логін скопійовано');
+}
+
+async function copyPassword(row: CredentialSummary) {
+    const response = await fetch(route('passwords.reveal', row.id), { headers: { Accept: 'application/json' } });
+    if (!response.ok) {
+        error('Не вдалося отримати пароль.');
+        return;
+    }
+    const data = (await response.json()) as { password: string | null };
+    if (!data.password) return;
+    await navigator.clipboard.writeText(data.password);
+    success('Пароль скопійовано');
+}
 
 const deletingCredential = ref<CredentialSummary | null>(null);
 const deleting = ref(false);
@@ -112,6 +136,8 @@ function confirmDelete() {
                             <DropdownMenuItem as-child>
                                 <Link :href="route('passwords.show', row.id)">Переглянути</Link>
                             </DropdownMenuItem>
+                            <DropdownMenuItem v-if="row.login" @click="copyLogin(row)">Копіювати логін</DropdownMenuItem>
+                            <DropdownMenuItem @click="copyPassword(row)">Копіювати пароль</DropdownMenuItem>
                             <DropdownMenuItem v-if="canEditWith(row.access_level)" as-child>
                                 <Link :href="route('passwords.edit', row.id)">Редагувати</Link>
                             </DropdownMenuItem>

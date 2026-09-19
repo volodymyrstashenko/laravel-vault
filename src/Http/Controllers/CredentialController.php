@@ -2,6 +2,7 @@
 
 namespace Thevps\Vault\Http\Controllers;
 
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -134,6 +135,19 @@ class CredentialController extends Controller
                 ? $this->availableUsersForDirectAccess($credential)
                 : [],
         ]);
+    }
+
+    /**
+     * Just the password, as JSON — for "Copy password" straight from the list (passwords/Index.vue's
+     * row menu), without a full page navigation to show(). Same ACL as show() (`accessLevelFor()`
+     * !== null, i.e. `view` or above) — this returns the same plaintext show() already puts in its
+     * Inertia props for anyone who can open that page, just reachable without leaving the list.
+     */
+    public function reveal(Request $request, Credential $credential): JsonResponse
+    {
+        abort_unless($credential->accessLevelFor($request->user()) !== null, 403);
+
+        return response()->json(['password' => $credential->password]);
     }
 
     /** Grant one specific user direct access to this credential, without any group. */

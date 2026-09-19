@@ -26,6 +26,7 @@ Route::prefix($names['passwords'])->name($names['passwords'].'.')->group(functio
     Route::get('/create', [CredentialController::class, 'create'])->name('create');
     Route::post('/', [CredentialController::class, 'store'])->name('store');
     Route::get('/{credential}', [CredentialController::class, 'show'])->name('show');
+    Route::get('/{credential}/reveal', [CredentialController::class, 'reveal'])->name('reveal');
     Route::get('/{credential}/edit', [CredentialController::class, 'edit'])->name('edit');
     Route::put('/{credential}', [CredentialController::class, 'update'])->name('update');
     Route::delete('/{credential}', [CredentialController::class, 'destroy'])->name('destroy');
