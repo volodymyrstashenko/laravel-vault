@@ -11,14 +11,17 @@ import { useInitials } from '@/composables/useInitials';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { ACCESS_LEVEL_OPTIONS, accessLevelBadgeVariant, accessLevelLabel, canEditWith, canManageWith } from '@/lib/credentials';
 import type { BreadcrumbItem } from '@/types';
-import type { CredentialDetail, CredentialDirectUser } from '@/types/vault';
+import type { CredentialDetail, CredentialDirectUser, LinkedAsset } from '@/types/vault';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Check, Copy, Download, Eye, EyeOff, Globe, Lock, Paperclip, Plus, ShieldCheck, Trash2, UserPlus } from '@lucide/vue';
+import { Check, Copy, Cpu, Download, Eye, EyeOff, Globe, Lock, Paperclip, Plus, ShieldCheck, Trash2, UserPlus } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
 const props = defineProps<{
     credential: CredentialDetail;
     availableUsersForAccess: { id: number; name: string; email: string }[];
+    /** "давай показувати до яких девайсів прилінковано" — host-specific, [] when the host
+     *  hasn't set config('vault.linked_assets_resolver'). */
+    linkedAssets: LinkedAsset[];
 }>();
 
 const { getInitials } = useInitials();
@@ -117,6 +120,15 @@ function formatSize(bytes: number): string {
                     <div>
                         <h1 class="text-lg font-semibold">{{ credential.name }}</h1>
                         <p class="text-sm text-muted-foreground">Створив {{ credential.created_by?.name }} · {{ credential.created_at }}</p>
+                        <!-- Колишня окрема картка "Групи" — на прохання користувача переосмислити
+                             вигляд: групи часто 1-2 короткі бейджі, ціла картка під них лишала
+                             величезну порожнечу поруч зі стислим блоком "Облікові дані". -->
+                        <div v-if="credential.groups.length" class="mt-1.5 flex flex-wrap gap-1.5">
+                            <Link v-for="group in credential.groups" :key="group.id" :href="route('password-groups.show', group.id)">
+                                <Badge variant="outline" class="hover:bg-accent">{{ group.name }}</Badge>
+                            </Link>
+                        </div>
+                        <p v-else class="mt-1.5 text-xs text-muted-foreground">Без груп (публічний пароль)</p>
                     </div>
                 </div>
                 <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -185,6 +197,31 @@ function formatSize(bytes: number): string {
                         </div>
                     </div>
 
+                    <!-- "давай показувати до яких девайсів прилінковано" — host-specific reverse
+                         link (config('vault.linked_assets_resolver')), відсутнє в інших хостах
+                         пакета не показує нічого. -->
+                    <div v-if="linkedAssets.length" class="rounded-lg border bg-card p-5">
+                        <h2 class="mb-3 flex items-center gap-1.5 text-sm font-semibold">
+                            <Cpu class="size-4 text-primary" />
+                            Пов'язані пристрої
+                        </h2>
+                        <div class="flex flex-col gap-1.5">
+                            <component
+                                :is="asset.url ? Link : 'div'"
+                                v-for="asset in linkedAssets"
+                                :key="asset.id"
+                                :href="asset.url ?? undefined"
+                                class="flex items-center justify-between gap-2 rounded-md px-1 py-1 text-sm"
+                                :class="asset.url ? 'hover:bg-muted/50' : ''"
+                            >
+                                <span class="truncate" :class="asset.url ? 'text-primary underline-offset-2 hover:underline' : ''">{{
+                                    asset.name
+                                }}</span>
+                                <span v-if="asset.subtitle" class="shrink-0 text-xs text-muted-foreground">{{ asset.subtitle }}</span>
+                            </component>
+                        </div>
+                    </div>
+
                     <div v-if="credential.totp_secret" class="rounded-lg border bg-card p-5">
                         <h2 class="mb-3 flex items-center gap-1.5 text-sm font-semibold">
                             <ShieldCheck class="size-4 text-primary" />
@@ -231,42 +268,44 @@ function formatSize(bytes: number): string {
 
                 <div class="flex flex-col gap-4">
                     <div class="rounded-lg border bg-card p-5">
-                        <h2 class="mb-3 text-sm font-semibold">Групи</h2>
-                        <div v-if="credential.groups.length" class="flex flex-wrap gap-1.5">
-                            <Link v-for="group in credential.groups" :key="group.id" :href="route('password-groups.show', group.id)">
-                                <Badge variant="outline" class="hover:bg-accent">{{ group.name }}</Badge>
-                            </Link>
-                        </div>
-                        <p v-else class="text-sm text-muted-foreground">Без груп (публічний пароль)</p>
-                    </div>
-
-                    <div class="rounded-lg border bg-card p-5">
                         <h2 class="mb-3 text-sm font-semibold">Персональний доступ</h2>
 
-                        <div v-if="credential.direct_users.length === 0 && !canManageWith(credential.access_level)" class="text-sm text-muted-foreground">
+                        <div
+                            v-if="credential.direct_users.length === 0 && !canManageWith(credential.access_level)"
+                            class="text-sm text-muted-foreground"
+                        >
                             Немає користувачів з окремим доступом
                         </div>
 
+                        <!-- Ім'я/email на своєму рядку на повну ширину, дії — рядком нижче: у
+                             вузькій sidebar-колонці аватар+ім'я+select+кошик в один рядок
+                             тіснили довші імена в потворне обрізання (на прохання користувача
+                             переосмислити вигляд). -->
                         <div v-if="credential.direct_users.length" class="flex flex-col gap-2">
                             <div
                                 v-for="directUser in credential.direct_users"
                                 :key="directUser.id"
-                                class="flex items-center gap-2.5 rounded-lg border border-sidebar-border/70 p-2.5 dark:border-sidebar-border"
+                                class="flex flex-col gap-2 rounded-lg border border-sidebar-border/70 p-2.5 dark:border-sidebar-border"
                             >
-                                <Avatar size="sm" class="size-8">
-                                    <AvatarFallback class="bg-primary/10 text-xs text-primary">{{ getInitials(directUser.name) }}</AvatarFallback>
-                                </Avatar>
-                                <div class="min-w-0 flex-1">
-                                    <p class="truncate text-sm font-medium text-foreground">{{ directUser.name }}</p>
-                                    <p class="truncate text-xs text-muted-foreground">{{ directUser.email }}</p>
+                                <div class="flex items-center gap-2.5">
+                                    <Avatar size="sm" class="size-8 shrink-0">
+                                        <AvatarFallback class="bg-primary/10 text-xs text-primary">{{ getInitials(directUser.name) }}</AvatarFallback>
+                                    </Avatar>
+                                    <div class="min-w-0 flex-1">
+                                        <p class="truncate text-sm font-medium text-foreground">{{ directUser.name }}</p>
+                                        <p class="truncate text-xs text-muted-foreground">{{ directUser.email }}</p>
+                                    </div>
+                                    <Badge v-if="!canManageWith(credential.access_level)" :variant="accessLevelBadgeVariant(directUser.access_level)">
+                                        {{ accessLevelLabel(directUser.access_level) }}
+                                    </Badge>
                                 </div>
 
-                                <template v-if="canManageWith(credential.access_level)">
+                                <div v-if="canManageWith(credential.access_level)" class="flex items-center gap-2 pl-[42px]">
                                     <Select
                                         :model-value="directUser.access_level"
                                         @update:model-value="(v) => changeDirectAccess(directUser, v as string)"
                                     >
-                                        <SelectTrigger class="h-8 w-36 text-xs">
+                                        <SelectTrigger class="h-8 flex-1 text-xs">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -277,15 +316,12 @@ function formatSize(bytes: number): string {
                                     </Select>
                                     <button
                                         type="button"
-                                        class="p-1.5 text-muted-foreground hover:text-destructive"
+                                        class="shrink-0 p-1.5 text-muted-foreground hover:text-destructive"
                                         @click="removeDirectAccess(directUser)"
                                     >
                                         <Trash2 class="size-4" />
                                     </button>
-                                </template>
-                                <Badge v-else :variant="accessLevelBadgeVariant(directUser.access_level)">{{
-                                    accessLevelLabel(directUser.access_level)
-                                }}</Badge>
+                                </div>
                             </div>
                         </div>
 

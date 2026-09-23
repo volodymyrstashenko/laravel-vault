@@ -329,4 +329,45 @@ class VaultFlowTest extends TestCase
         config(['vault.institution_resolver' => null]);
         $this->assertSame(1, CredentialGroup::count());
     }
+
+    /**
+     * "давай показувати до яких девайсів прилінковано" — the package has no device model of
+     * its own, so this is a host-provided resolver hook (config('vault.linked_assets_resolver')).
+     */
+    public function test_show_exposes_linked_assets_from_the_configured_resolver(): void
+    {
+        Http::fake();
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $this->actingAs($owner);
+
+        $this->post(route('passwords.store'), ['visibility' => 'public', 'name' => 'Router admin'])->assertRedirect();
+        $credential = Credential::firstOrFail();
+
+        config(['vault.linked_assets_resolver' => fn (Credential $c) => [
+            ['id' => 42, 'name' => 'TP-LINK AX23', 'subtitle' => 'INV-0512', 'url' => "/assets/{$c->id}"],
+        ]]);
+
+        $this->get(route('passwords.show', $credential))
+            ->assertInertia(fn ($page) => $page
+                ->has('linkedAssets', 1)
+                ->where('linkedAssets.0.name', 'TP-LINK AX23')
+                ->where('linkedAssets.0.subtitle', 'INV-0512'));
+    }
+
+    public function test_linked_assets_defaults_to_an_empty_array_without_a_resolver(): void
+    {
+        Http::fake();
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $this->actingAs($owner);
+
+        $this->post(route('passwords.store'), ['visibility' => 'public', 'name' => 'No devices'])->assertRedirect();
+        $credential = Credential::firstOrFail();
+
+        config(['vault.linked_assets_resolver' => null]);
+
+        $this->get(route('passwords.show', $credential))
+            ->assertInertia(fn ($page) => $page->has('linkedAssets', 0));
+    }
 }

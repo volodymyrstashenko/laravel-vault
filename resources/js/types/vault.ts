@@ -50,6 +50,18 @@ export interface CredentialDirectUser {
     access_level: CredentialAccessLevel;
 }
 
+/**
+ * A host-specific record pointing AT this credential (e.g. a device whose `credential_id`
+ * references it) — passed separately from `CredentialDetail` (own Inertia prop, `linkedAssets`)
+ * since the package itself has no concept of "assets"; see `config('vault.linked_assets_resolver')`.
+ */
+export interface LinkedAsset {
+    id: number;
+    name: string;
+    subtitle: string | null;
+    url: string | null;
+}
+
 export interface CredentialDetail {
     id: number;
     name: string;

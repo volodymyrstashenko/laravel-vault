@@ -134,6 +134,9 @@ class CredentialController extends Controller
             'availableUsersForAccess' => $accessLevel === CredentialGroup::ACCESS_MANAGE
                 ? $this->availableUsersForDirectAccess($credential)
                 : [],
+            // "давай показувати до яких девайсів прилінковано" — host-specific (see
+            // config('vault.linked_assets_resolver')), [] when the host hasn't set one.
+            'linkedAssets' => Vault::linkedAssetsFor($credential),
         ]);
     }
 

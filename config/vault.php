@@ -104,4 +104,26 @@ return [
      */
     'favicon_endpoint' => 'https://www.google.com/s2/favicons?domain={domain}&sz={size}',
     'favicon_size' => 128,
+
+    /*
+     |--------------------------------------------------------------------------
+     | Linked resources (optional)
+     |--------------------------------------------------------------------------
+     | The package has no concept of "devices" or any other host-specific
+     | model — a host that lets its own records point AT a credential (e.g. an
+     | asset's `credential_id`) can surface that reverse link on the password
+     | Show page by setting this to a callable. Null (default) hides the
+     | section entirely.
+     |
+     | Signature: callable(\Thevps\Vault\Models\Credential $credential): array
+     |            Each item: ['id' => int, 'name' => string, 'subtitle' =>
+     |            ?string, 'url' => ?string].
+     |
+     | Example:   'linked_assets_resolver' => fn ($credential) => \App\Models\Asset
+     |                ::where('credential_id', $credential->id)->get()
+     |                ->map(fn ($a) => ['id' => $a->id, 'name' => $a->name,
+     |                    'subtitle' => $a->inventory_number, 'url' => route('assets.show', $a->id)])
+     |                ->all(),
+     */
+    'linked_assets_resolver' => null,
 ];

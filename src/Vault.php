@@ -3,6 +3,7 @@
 namespace Thevps\Vault;
 
 use Illuminate\Database\Eloquent\Model;
+use Thevps\Vault\Models\Credential;
 
 class Vault
 {
@@ -55,6 +56,18 @@ class Vault
         $resolver = config('vault.available_users_resolver');
 
         return $resolver ? $resolver() : static::userQuery();
+    }
+
+    /**
+     * Host-specific records that point AT this credential (e.g. an asset's `credential_id`) —
+     * `config('vault.linked_assets_resolver')`, or `[]` when the host hasn't configured one.
+     * The package itself has no `Asset`/device model to query.
+     */
+    public static function linkedAssetsFor(Credential $credential): array
+    {
+        $resolver = config('vault.linked_assets_resolver');
+
+        return $resolver ? $resolver($credential) : [];
     }
 
     /** Whether $user may manage `public`-visibility Wi-Fi networks (create/edit/delete). */
