@@ -14,7 +14,7 @@ import type { BreadcrumbItem, PaginatedResponse, TableColumn } from '@/types';
 import type { CredentialSummary } from '@/types/vault';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Globe, KeyRound, MoreHorizontal, Plus } from '@lucide/vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 const props = defineProps<{
     credentials: PaginatedResponse<CredentialSummary>;
@@ -30,6 +30,34 @@ const columns: TableColumn<CredentialSummary>[] = [
     { key: 'created_at', label: 'Створено', sortable: true, hideOnMobile: true },
     { key: 'actions', label: '', class: 'w-10' },
 ];
+
+/**
+ * Групування за групами паролів (user: "чим більше паролів, тим більше хаос") — акордеони
+ * DataTable (groupBy). Пароль у кількох групах дублюється в кожній із них (окремий `row_key`,
+ * бо `id` не унікальний серед розгорнутих рядків); без жодної групи (лише прямий/публічний
+ * доступ) — "Без групи". Коли користувач сам обрав сортування колонки — групування вимкнено
+ * (рядки тоді не кластеризовані), як на /assets.
+ */
+type GroupedCredential = CredentialSummary & { row_key: string; group_label: string };
+
+const NO_GROUP = 'Без групи';
+const isGrouped = computed(() => !props.query.sort);
+
+const rows = computed<GroupedCredential[]>(() => {
+    const expanded = props.credentials.data.flatMap((credential) => {
+        const labels = credential.groups.length ? credential.groups.map((g) => g.name) : [NO_GROUP];
+        return labels.map((label) => ({ ...credential, row_key: `${label}:${credential.id}`, group_label: label }));
+    });
+    if (!isGrouped.value) return expanded;
+    return expanded.sort((a, b) => {
+        if (a.group_label === b.group_label) return a.name.localeCompare(b.name, 'uk');
+        if (a.group_label === NO_GROUP) return 1;
+        if (b.group_label === NO_GROUP) return -1;
+        return a.group_label.localeCompare(b.group_label, 'uk');
+    });
+});
+
+const groupBy = computed(() => (isGrouped.value ? (row: GroupedCredential) => row.group_label : undefined));
 
 const query = useTableQuery({ path: route('passwords.index'), initial: fromQueryParams(props.query, []) });
 
@@ -78,7 +106,9 @@ function confirmDelete() {
         <div class="flex h-full flex-1 flex-col gap-4 p-4">
             <DataTable
                 :columns="columns"
-                :rows="credentials.data"
+                :rows="rows"
+                row-key="row_key"
+                :group-by="groupBy"
                 :meta="credentials.meta"
                 :state="query.state"
                 search-placeholder="Пошук за назвою або логіном…"

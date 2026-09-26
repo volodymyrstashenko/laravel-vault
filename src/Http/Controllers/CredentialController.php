@@ -24,6 +24,11 @@ class CredentialController extends Controller
 {
     private const SORTABLE_COLUMNS = ['name', 'created_at'];
 
+    // Without an explicit column sort the list is grouped by credential group on the client
+    // (passwords/Index.vue), so pagination would cut a group in half across pages — use a
+    // generous ceiling instead (collapsed accordions keep the DOM cost low).
+    private const GROUPED_VIEW_PER_PAGE = 2000;
+
     public function index(Request $request): Response
     {
         $user = $request->user();
@@ -41,6 +46,8 @@ class CredentialController extends Controller
             ->where('user_id', $user->getKey())
             ->pluck('access_level', 'credential_id');
 
+        $hasExplicitSort = $request->filled('sort') && in_array($request->input('sort'), self::SORTABLE_COLUMNS, true);
+
         $credentials = Credential::query()
             ->where(function ($q) use ($myAccess, $myDirectAccess) {
                 $q->whereHas('groups', fn ($g) => $g->whereIn('credential_groups.id', $myAccess->keys()))
@@ -56,11 +63,11 @@ class CredentialController extends Controller
                 }),
             )
             ->when(
-                $request->filled('sort') && in_array($request->input('sort'), self::SORTABLE_COLUMNS, true),
+                $hasExplicitSort,
                 fn ($query) => $query->orderBy($request->input('sort'), $request->string('direction')->toString() === 'desc' ? 'desc' : 'asc'),
                 fn ($query) => $query->orderBy('name'),
             )
-            ->paginate(15)
+            ->paginate($hasExplicitSort ? 15 : self::GROUPED_VIEW_PER_PAGE)
             ->withQueryString();
 
         return Inertia::render(Vault::page('passwords/Index'), [
