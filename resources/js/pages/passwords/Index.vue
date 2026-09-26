@@ -44,11 +44,13 @@ const NO_GROUP = 'Без групи';
 const isGrouped = computed(() => !props.query.sort);
 
 const rows = computed<GroupedCredential[]>(() => {
+    if (!isGrouped.value) {
+        return props.credentials.data.map((credential) => ({ ...credential, row_key: String(credential.id), group_label: '' }));
+    }
     const expanded = props.credentials.data.flatMap((credential) => {
         const labels = credential.groups.length ? credential.groups.map((g) => g.name) : [NO_GROUP];
         return labels.map((label) => ({ ...credential, row_key: `${label}:${credential.id}`, group_label: label }));
     });
-    if (!isGrouped.value) return expanded;
     return expanded.sort((a, b) => {
         if (a.group_label === b.group_label) return a.name.localeCompare(b.name, 'uk');
         if (a.group_label === NO_GROUP) return 1;
