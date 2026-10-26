@@ -36,6 +36,16 @@ return [
      */
     'route_middleware' => ['web', 'auth'],
 
+    /*
+     |--------------------------------------------------------------------------
+     | Import / export middleware
+     |--------------------------------------------------------------------------
+     | Extra middleware on the bulk import/export pages (passwords/transfer*). Export
+     | downloads plaintext secrets, so a host with Laravel's password confirmation
+     | should put `password.confirm` here. Empty = only `route_middleware`.
+     */
+    'transfer_middleware' => [],
+
     'routes' => [
         'passwords' => 'passwords',
         'password_groups' => 'password-groups',

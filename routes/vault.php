@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use Thevps\Vault\Http\Controllers\CredentialController;
 use Thevps\Vault\Http\Controllers\CredentialGroupController;
+use Thevps\Vault\Http\Controllers\CredentialTransferController;
 use Thevps\Vault\Http\Controllers\WifiNetworkController;
 
 /*
@@ -25,6 +26,15 @@ Route::prefix($names['passwords'])->name($names['passwords'].'.')->group(functio
     Route::get('/', [CredentialController::class, 'index'])->name('index');
     Route::get('/create', [CredentialController::class, 'create'])->name('create');
     Route::post('/', [CredentialController::class, 'store'])->name('store');
+
+    // Bulk import/export — before /{credential}. Both pages re-ask the password (export hands out
+    // plaintext secrets in a file), via config('vault.transfer_middleware').
+    Route::middleware(config('vault.transfer_middleware', []))->group(function () {
+        Route::get('/transfer', [CredentialTransferController::class, 'index'])->name('transfer');
+        Route::get('/transfer/template', [CredentialTransferController::class, 'template'])->name('transfer.template');
+        Route::post('/transfer/import', [CredentialTransferController::class, 'import'])->name('transfer.import');
+        Route::get('/transfer/export', [CredentialTransferController::class, 'export'])->name('transfer.export');
+    });
     Route::get('/{credential}', [CredentialController::class, 'show'])->name('show');
     Route::get('/{credential}/reveal', [CredentialController::class, 'reveal'])->name('reveal');
     Route::get('/{credential}/edit', [CredentialController::class, 'edit'])->name('edit');

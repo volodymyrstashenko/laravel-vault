@@ -13,7 +13,7 @@ import { fromQueryParams } from '@/lib/table';
 import type { BreadcrumbItem, PaginatedResponse, TableColumn } from '@/types';
 import type { CredentialSummary } from '@/types/vault';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Globe, KeyRound, MoreHorizontal, Plus } from '@lucide/vue';
+import { ArrowUpDown, Globe, KeyRound, MoreHorizontal, Plus } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
 const props = defineProps<{
@@ -124,6 +124,12 @@ function confirmDelete() {
                         <Link :href="route('password-groups.index')">
                             <KeyRound class="size-4" />
                             Групи паролів
+                        </Link>
+                    </Button>
+                    <Button as-child variant="outline" size="sm" class="gap-1.5">
+                        <Link :href="route('passwords.transfer')">
+                            <ArrowUpDown class="size-4" />
+                            Імпорт / експорт
                         </Link>
                     </Button>
                     <Button as-child size="sm" class="gap-1.5">
