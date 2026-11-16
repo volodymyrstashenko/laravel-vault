@@ -38,10 +38,11 @@ php artisan migrate
 `vendor:publish --tag=laravel-vault-frontend` копіює Vue/TS у:
 
 ```
-resources/js/pages/passwords/{Index,Show,Create,Edit}.vue
+resources/js/pages/passwords/{Index,Create,Edit,Transfer}.vue
 resources/js/pages/password-groups/{Index,Show,Create}.vue
 resources/js/pages/wifi/Index.vue
-resources/js/components/credentials/{CredentialForm,CredentialIcon,TotpCode}.vue
+resources/js/components/credentials/{CredentialForm,CredentialIcon,TotpCode,CredentialDetailPanel,CredentialMenuItems}.vue
+resources/js/components/credentials/useCredentialActions.ts
 resources/js/components/wifi/{WifiQrCode,WifiConnectModal,AppWifiQuick}.vue
 resources/js/lib/{credentials,wifi,totp,passwordGenerator}.ts
 resources/js/types/vault.ts
@@ -50,13 +51,34 @@ resources/js/types/vault.ts
 Далі відредагуйте `config/vault.php` (`user_model`, `route_middleware`) і додайте `vault.ts` у
 свій barrel типів (`resources/js/types/index.ts`), якщо він є.
 
+### Оновлення до v0.4.0: сторінки `passwords/Show` більше немає
+
+Модуль паролів — master-detail: список + панель перегляду (`CredentialDetailPanel.vue`) на
+одній сторінці. Маршрут `passwords.show` тепер рендерить **`passwords/Index`** з пропом
+`selected` (`CredentialSelection`: `credential`, `availableUsersForAccess`, `linkedAssets`);
+`index` віддає `credentials` пласким масивом із полем `has_totp`, а `reveal` повертає ще й
+`totp_secret`. Тому хостам треба перепублікувати фронтенд і прибрати стару сторінку:
+
+```bash
+php artisan vendor:publish --tag=laravel-vault-frontend --force
+rm resources/js/pages/passwords/Show.vue
+```
+
+(перед `--force` перенесіть власні адаптації з опублікованих копій — вони перезапишуться),
+і додати `@/components/ui/context-menu` (див. нижче).
+
 ## Точки адаптації фронтенду (хост володіє копіями)
 
 - **UI-кіт** `@/components/ui/*` (shadcn-vue на **reka-ui**): `avatar badge button checkbox
   dialog dropdown-menu input label select tabs`.
+- **`@/components/ui/context-menu`** — експорти `ContextMenu`, `ContextMenuTrigger`,
+  `ContextMenuContent`, `ContextMenuItem`, `ContextMenuSeparator` (тонкі shadcn-vue-обгортки
+  над reka-ui `ContextMenu*`). Потрібен для контекстного меню (правий клік) у списку
+  `passwords/Index`. Пакет його не постачає — хост додає сам (можна взяти з
+  app-strogaz: `resources/js/components/ui/context-menu/*`).
 - `@/layouts/AppLayout.vue` — макет сторінки (breadcrumbs slot).
 - `@/components/ConfirmDeleteDialog.vue` — контрольований діалог (`open` + `@confirm`).
-- `@/components/InputError.vue`, `@/composables/useInitials`, `@/composables/useTableQuery`,
+- `@/components/InputError.vue`, `@/composables/useInitials`, `@/composables/useToast`, `@/composables/useTableQuery`,
   `@/components/data-table` (`DataTable`), `@/lib/table` (`fromQueryParams`).
 - Тости через Inertia flash (`success`/`error`) — контролер лише робить `->with('success', …)`.
 - npm: `qrcode`, `@lucide/vue`, `@inertiajs/vue3`.

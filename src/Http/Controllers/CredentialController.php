@@ -22,61 +22,13 @@ use Thevps\Vault\Vault;
 
 class CredentialController extends Controller
 {
-    private const SORTABLE_COLUMNS = ['name', 'created_at'];
-
-    // Without an explicit column sort the list is grouped by credential group on the client
-    // (passwords/Index.vue), so pagination would cut a group in half across pages — use a
-    // generous ceiling instead (collapsed accordions keep the DOM cost low).
-    private const GROUPED_VIEW_PER_PAGE = 2000;
+    // The list is filtered/searched on the client (passwords/Index.vue), so it's loaded whole —
+    // a generous ceiling rather than pagination.
+    private const LIST_LIMIT = 2000;
 
     public function index(Request $request): Response
     {
-        $user = $request->user();
-
-        // One query — the user's access level per group they belong to (map group_id =>
-        // access_level). Each credential's level is then resolved in memory (max over its
-        // groups), no N+1 per row.
-        $myAccess = DB::table('credential_group_members')
-            ->where('user_id', $user->getKey())
-            ->pluck('access_level', 'credential_group_id');
-
-        // Same one-query trick as group access, for credentials shared with this user directly
-        // (no group involved) — see Credential::directUsers()/HasGroupAccess.
-        $myDirectAccess = DB::table('credential_user_access')
-            ->where('user_id', $user->getKey())
-            ->pluck('access_level', 'credential_id');
-
-        $hasExplicitSort = $request->filled('sort') && in_array($request->input('sort'), self::SORTABLE_COLUMNS, true);
-
-        $credentials = Credential::query()
-            ->where(function ($q) use ($myAccess, $myDirectAccess) {
-                $q->whereHas('groups', fn ($g) => $g->whereIn('credential_groups.id', $myAccess->keys()))
-                    ->orWhereIn('id', $myDirectAccess->keys())
-                    ->orWhere('visibility', 'public');
-            })
-            ->with(['groups:id,name', 'creator:id,name'])
-            ->when(
-                $request->filled('search'),
-                fn ($query) => $query->where(function ($q) use ($request) {
-                    $search = $request->string('search')->toString();
-                    $q->where('name', 'like', "%{$search}%")->orWhere('login', 'like', "%{$search}%");
-                }),
-            )
-            ->when(
-                $hasExplicitSort,
-                fn ($query) => $query->orderBy($request->input('sort'), $request->string('direction')->toString() === 'desc' ? 'desc' : 'asc'),
-                fn ($query) => $query->orderBy('name'),
-            )
-            ->paginate($hasExplicitSort ? 15 : self::GROUPED_VIEW_PER_PAGE)
-            ->withQueryString();
-
-        return Inertia::render(Vault::page('passwords/Index'), [
-            'credentials' => [
-                'data' => $credentials->through(fn (Credential $credential) => $this->presentSummary($credential, $myAccess, $myDirectAccess, $user))->items(),
-                'meta' => $this->paginationMeta($credentials),
-            ],
-            'query' => (object) $request->only(['search', 'sort', 'direction', 'page']),
-        ]);
+        return $this->renderVault($request);
     }
 
     public function create(Request $request): Response
@@ -131,20 +83,17 @@ class CredentialController extends Controller
         return Redirect::route(Vault::routeName('passwords', 'show'), $credential->id)->with('success', 'Пароль створено.');
     }
 
+    /**
+     * The same master-detail screen as index(), with this credential open in the detail pane.
+     * Switching between credentials is an Inertia partial reload of `selected` only — the list
+     * prop is a closure, so it isn't re-queried.
+     */
     public function show(Request $request, Credential $credential): Response
     {
         $accessLevel = $credential->accessLevelFor($request->user());
         abort_unless($accessLevel !== null, 403);
 
-        return Inertia::render(Vault::page('passwords/Show'), [
-            'credential' => $this->presentDetail($credential, $accessLevel),
-            'availableUsersForAccess' => $accessLevel === CredentialGroup::ACCESS_MANAGE
-                ? $this->availableUsersForDirectAccess($credential)
-                : [],
-            // "давай показувати до яких девайсів прилінковано" — host-specific (see
-            // config('vault.linked_assets_resolver')), [] when the host hasn't set one.
-            'linkedAssets' => Vault::linkedAssetsFor($credential),
-        ]);
+        return $this->renderVault($request, $credential, $accessLevel);
     }
 
     /**
@@ -157,7 +106,7 @@ class CredentialController extends Controller
     {
         abort_unless($credential->accessLevelFor($request->user()) !== null, 403);
 
-        return response()->json(['password' => $credential->password]);
+        return response()->json(['password' => $credential->password, 'totp_secret' => $credential->totp_secret]);
     }
 
     /** Grant one specific user direct access to this credential, without any group. */
@@ -297,6 +246,51 @@ class CredentialController extends Controller
         }
     }
 
+    private function renderVault(Request $request, ?Credential $credential = null, ?string $accessLevel = null): Response
+    {
+        $user = $request->user();
+
+        return Inertia::render(Vault::page('passwords/Index'), [
+            'credentials' => fn () => $this->visibleSummaries($user),
+            'selected' => $credential ? fn () => [
+                'credential' => $this->presentDetail($credential, $accessLevel),
+                'availableUsersForAccess' => $accessLevel === CredentialGroup::ACCESS_MANAGE
+                    ? $this->availableUsersForDirectAccess($credential)
+                    : [],
+                // "давай показувати до яких девайсів прилінковано" — host-specific (see
+                // config('vault.linked_assets_resolver')), [] when the host hasn't set one.
+                'linkedAssets' => Vault::linkedAssetsFor($credential),
+            ] : null,
+        ]);
+    }
+
+    private function visibleSummaries($user): array
+    {
+        // One query — the user's access level per group they belong to; each credential's level
+        // is then resolved in memory (max over its groups), no N+1 per row.
+        $myAccess = DB::table('credential_group_members')
+            ->where('user_id', $user->getKey())
+            ->pluck('access_level', 'credential_group_id');
+
+        // Same one-query trick for credentials shared with this user directly (no group).
+        $myDirectAccess = DB::table('credential_user_access')
+            ->where('user_id', $user->getKey())
+            ->pluck('access_level', 'credential_id');
+
+        return Credential::query()
+            ->where(function ($q) use ($myAccess, $myDirectAccess) {
+                $q->whereHas('groups', fn ($g) => $g->whereIn('credential_groups.id', $myAccess->keys()))
+                    ->orWhereIn('id', $myDirectAccess->keys())
+                    ->orWhere('visibility', 'public');
+            })
+            ->with(['groups:id,name', 'creator:id,name', 'media'])
+            ->orderBy('name')
+            ->limit(self::LIST_LIMIT)
+            ->get()
+            ->map(fn (Credential $credential) => $this->presentSummary($credential, $myAccess, $myDirectAccess, $user))
+            ->all();
+    }
+
     /** Groups the user MAY add credentials to — only where they have 'manage'. */
     private function manageableGroups($user)
     {
@@ -334,6 +328,8 @@ class CredentialController extends Controller
             'url' => $credential->url,
             'visibility' => $credential->visibility,
             'icon_url' => $credential->iconUrl(),
+            // Raw column, not the decrypted value — the list only needs to know a 2FA code exists.
+            'has_totp' => filled($credential->getRawOriginal('totp_secret')),
             'groups' => $credential->groups->map(fn (CredentialGroup $group) => ['id' => $group->id, 'name' => $group->name])->values(),
             'access_level' => $level,
             'created_by' => $credential->creator?->only(['id', 'name']),
@@ -383,18 +379,6 @@ class CredentialController extends Controller
             'access_level' => $accessLevel,
             'created_by' => $credential->creator?->only(['id', 'name']),
             'created_at' => $credential->created_at?->toDateString(),
-        ];
-    }
-
-    private function paginationMeta($paginator): array
-    {
-        return [
-            'current_page' => $paginator->currentPage(),
-            'last_page' => $paginator->lastPage(),
-            'per_page' => $paginator->perPage(),
-            'total' => $paginator->total(),
-            'from' => $paginator->firstItem(),
-            'to' => $paginator->lastItem(),
         ];
     }
 }

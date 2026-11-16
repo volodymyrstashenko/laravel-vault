@@ -23,8 +23,8 @@ const props = withDefaults(
         credential?: CredentialDetail;
         manageableGroups: CredentialGroupRef[];
         // Only meaningful (and only passed) on create — see the "Персональний доступ" section
-        // below. Editing an existing credential's direct-access grants happens on its own Show
-        // page instead (passwords/Show.vue), same as group membership lives on the group's Show
+        // below. Editing an existing credential's direct-access grants happens in its detail
+        // panel instead (CredentialDetailPanel.vue), same as group membership lives on the group's Show
         // page — there's simply no such page yet for a credential that doesn't exist.
         availableUsersForAccess?: { id: number; name: string; email: string }[];
     }>(),

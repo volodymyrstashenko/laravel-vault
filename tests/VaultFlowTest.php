@@ -233,6 +233,55 @@ class VaultFlowTest extends TestCase
         $this->actingAs($stranger)->getJson(route('passwords.reveal', $credential))->assertForbidden();
     }
 
+    /**
+     * Master-detail screen: show() renders the list page with the credential open; the list
+     * itself never carries secrets, and switching credentials (partial reload of `selected`)
+     * doesn't re-send the list.
+     */
+    public function test_show_opens_the_credential_inside_the_list_page(): void
+    {
+        Http::fake();
+
+        $owner = TestUser::create(['name' => 'Owner']);
+        $this->actingAs($owner);
+
+        $this->post(route('passwords.store'), [
+            'visibility' => 'public',
+            'name' => 'Mail',
+            'login' => 'admin',
+            'password' => 's3cret',
+            'totp_secret' => 'JBSWY3DPEHPK3PXP',
+        ])->assertRedirect();
+        $credential = Credential::firstOrFail();
+
+        $this->get(route('passwords.index'))
+            ->assertInertia(fn ($page) => $page
+                ->component('passwords/Index')
+                ->has('credentials', 1)
+                ->where('credentials.0.has_totp', true)
+                ->missing('credentials.0.password')
+                ->where('selected', null));
+
+        $this->get(route('passwords.show', $credential))
+            ->assertInertia(fn ($page) => $page
+                ->component('passwords/Index')
+                ->has('credentials', 1)
+                ->where('selected.credential.id', $credential->id)
+                ->where('selected.credential.password', 's3cret'));
+
+        $version = $this->get(route('passwords.index'))->viewData('page')['version'] ?? '';
+        $this->get(route('passwords.show', $credential), [
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => $version,
+            'X-Inertia-Partial-Component' => 'passwords/Index',
+            'X-Inertia-Partial-Data' => 'selected',
+        ])->assertOk()
+            ->assertJsonMissingPath('props.credentials')
+            ->assertJsonPath('props.selected.credential.id', $credential->id);
+
+        $this->getJson(route('passwords.reveal', $credential))->assertJson(['totp_secret' => 'JBSWY3DPEHPK3PXP']);
+    }
+
     public function test_wifi_public_quick_list_bands_and_windows_profile(): void
     {
         $owner = TestUser::create(['name' => 'Owner']);
@@ -350,9 +399,9 @@ class VaultFlowTest extends TestCase
 
         $this->get(route('passwords.show', $credential))
             ->assertInertia(fn ($page) => $page
-                ->has('linkedAssets', 1)
-                ->where('linkedAssets.0.name', 'TP-LINK AX23')
-                ->where('linkedAssets.0.subtitle', 'INV-0512'));
+                ->has('selected.linkedAssets', 1)
+                ->where('selected.linkedAssets.0.name', 'TP-LINK AX23')
+                ->where('selected.linkedAssets.0.subtitle', 'INV-0512'));
     }
 
     public function test_linked_assets_defaults_to_an_empty_array_without_a_resolver(): void
@@ -368,6 +417,6 @@ class VaultFlowTest extends TestCase
         config(['vault.linked_assets_resolver' => null]);
 
         $this->get(route('passwords.show', $credential))
-            ->assertInertia(fn ($page) => $page->has('linkedAssets', 0));
+            ->assertInertia(fn ($page) => $page->has('selected.linkedAssets', 0));
     }
 }

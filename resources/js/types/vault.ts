@@ -36,6 +36,7 @@ export interface CredentialSummary {
     url: string | null;
     visibility: CredentialVisibility;
     icon_url: string | null;
+    has_totp: boolean;
     groups: CredentialGroupRef[];
     access_level: CredentialAccessLevel;
     created_by: { id: number; name: string } | null;
@@ -79,6 +80,13 @@ export interface CredentialDetail {
     access_level: CredentialAccessLevel;
     created_by: { id: number; name: string } | null;
     created_at: string;
+}
+
+/** The credential open in the detail pane of passwords/Index (the `selected` prop). */
+export interface CredentialSelection {
+    credential: CredentialDetail;
+    availableUsersForAccess: { id: number; name: string; email: string }[];
+    linkedAssets: LinkedAsset[];
 }
 
 export interface CredentialGroupMember {
